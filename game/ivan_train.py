@@ -193,10 +193,28 @@ class Math:
 
         return diff_x, diff_y
 
+    def is_angle(self):
+        # берём три точки
+        x1, y1 = self.coordinates[-4]
+        x2, y2 = self.coordinates[-3]
+        x3, y3 = self.coordinates[-2]
+        x4, y4 = self.coordinates[-1]
+
+        # вычисяем угол наклона первой прямой
+        k1 = (x2 - x1) / (y2 - y1)
+        # вычисляем угол наклона второй прямой
+        k2 = (x4 - x3) / (y4 - y3)
+
+        # если они противоположны
+        if k1 == - 1 / k2:
+            return True
+        else:
+            return False
+
 
 class Objects:
-    def __init__(self, name):
-        self.name = name
+    def __init__(self):
+        pass
 
     def area(self):
         pass
@@ -204,21 +222,34 @@ class Objects:
 
 class Line(Objects):
     def __init__(self, name, k, b, info):
-        super().__init__(name)
+        super().__init__()
+        self.name = name
         self.k = k
         self.b = b
         self.info = info
 
     def length(self):
+        """
+        метод расчёта длины прямой
+        :return:
+        """
         x1, y1 = self.info[0]
         x2, y2 = self.info[-1]
 
         return sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
+    def coeffs(self):
+        """
+        метод для вывода коээфициента прямой
+        :return:
+        """
+        return self.k, self.b
+
 
 class Circle(Objects):
     def __init__(self, name, x_c, y_c, r, info):
-        super().__init__(name)
+        super().__init__()
+        self.name = name
         self.x_c = x_c
         self.y_c = y_c
         self.r = r
@@ -226,6 +257,84 @@ class Circle(Objects):
 
     def area(self):
         return 2 * pi * self.r
+
+
+class Angle(Objects):
+    def __init__(self, line1, line2):
+        super().__init__()
+        self.name = None
+        self.x = 0
+        self.y = 0
+        self.line1 = line1
+        self.line2 = line2
+        self.type = ""
+
+    def center_point(self):
+        """
+        метод вычисления координат угла
+        :return:
+        """
+        k1, b1 = self.line1.coeffs()
+        k2, b2 = self.line2.coeefs()
+
+        # вычисление координат угла
+        self.x = (b2 - b1) / (k1 - k2)
+        self.y = k1 * self.x + b1
+
+    def in_or_out(self, my_x, my_y):
+        """
+        метод определения типа угла: внутренний или наружный
+        :param my_x:
+        :param my_y:
+        :return:
+        """
+        # крайние точки возле точки угла
+        point1 = self.line1.info[-1]
+        point2 = self.line2.info[0]
+
+        # расчёт середины отрезка между точками
+        x_mid = (point1[0] + point2[0]) / 2
+        y_mid = (point1[1] + point2[1]) / 2
+
+        # расчёт расстояния до угла и до середины отрезка
+        len1 = sqrt((my_x - x_mid) ** 2 + (my_y - y_mid) ** 2)
+        len2 = sqrt((my_x - self.x) ** 2 + (my_y - self.y) ** 2)
+
+        # если от объекта до середины отрезка расстояние больше
+        if len1 > len2:
+            self.type = "out"
+        # иначе
+        else:
+            self.type = "in"
+
+        return self.type
+
+
+class Rectangle(Objects):
+    def __init__(self, name, angle_points):
+        super().__init__()
+        self.name = name
+        self.angle_points = angle_points
+        self.lines_list = []
+
+    def lines(self):
+        """
+        метод для вывода списка линий
+        :return:
+        """
+        length = len(self.angle_points)
+
+        for i in range(length):
+            x1, y1 = self.angle_points[i]
+            if i == 3:
+                x2, y2 = self.angle_points[0]
+            else:
+                x2, y2 = self.angle_points[i + 1]
+
+            # добавление 2 точек линии
+            self.lines_list.append(((x1, y1), (x2, y2)))
+
+        return self.lines_list
 
 
 class Train:
@@ -255,7 +364,6 @@ class Train:
         self.v_max = v_max  # максимальная скорость точки
 
         self.v = 0  # скорость точки
-        print(self.v)
 
         self.points = []  # список координат обнаруженных точек
         self.math = Math()  # экземпляр класса математики
@@ -264,23 +372,29 @@ class Train:
         self.figures = {
             "lines": [],
             "circles": [],
-            "points": self.points
+            "points": []
         }
 
         self.distance = None  # расстояние до препятствия
 
         self.modes = ["scan", "run", "rotate"]  # список режимов движения
-        self.mode = "scan" # режим движения
+        self.mode = "scan"  # режим движения
 
         self.rotate = 1  # радиан поворота
         self.scan_run = True  # True - сканирование, False - движение
         self.run_rotate = True  # True - движение, False - поворот
-        self.count_run = 0
+        self.count_run = 0  # сколько прошли
+        self.rad = 0  # предыдущее значение угла
+        self.dist = 0  # сколько надо пройти
 
-        self.eps = 0.001  # пределе сканирования
-        self.count = 1
+        self.eps = 0.0002  # пределе сканирования
+        self.count = 1  # номер поворота
+
+        self.primitives = ""
 
         self.auto = True  # управление в автоматическом режиме или нет
+        self.temp_list = []
+        self.angles = []
 
     def update(self, x: float, y: float):
         """
@@ -339,69 +453,136 @@ class Train:
         метод необходимых вычислений
         :return:
         """
+        self.primitives = "borders"
 
-        print(self.v)
-        print("Дистанция", self.distance)
-        print("self.mode", self.mode)
-        print("self.scan_run", self.scan_run)
-        print("self.run_rotate", self.run_rotate)
-
-        # сканирование окружности
-        # если есть препятствие
-        if self.distance and self.scan_run:
-            self.mode = self.modes[0]
-
-        elif self.run_rotate is False:
-            self.mode = self.modes[1]
-
-        elif self.run_rotate:
-            self.mode = self.modes[2]
-
-        match self.mode:
-            case "scan":
-
-                # обновление списка
-                self.math.add_list(self.points)
-
-                if self.math.length() > 3:
-                    (x_c, y_c), r = self.math.approx_circ()
-                    self.figures["circles"] = [((x_c, y_c), r, (0, 25, 255))]
-
-                self.alpha += radians(self.rotate)
-
-                self.run_rotate = True
-
-            case "run":
-                self.scan_run = False
-                if self.count_run < 36:
-                    print(self.v)
-                    self.x = self.x + self.v * cos(self.alpha)
-                    self.y = self.y + self.v * sin(self.alpha)
-                    self.count_run += 1
-                    self.run_rotate = False
-                else:
-                    print("STOP")
-                    self.count_run = 0
-                    self.run_rotate = True
-
-            case "rotate":
-                if self.count == 1:
-                    self.alpha += radians(15 - self.rotate)
-                    self.count += 1
-                    self.mode = self.modes[1]
-                    self.run_rotate = False
-
-                elif self.count == 2:
-                    self.alpha = self.alpha - radians(90)
-                    self.count += 1
-                    self.mode = self.modes[1]
-                    self.run_rotate = False
-
-                elif self.count == 3:
-                    self.alpha -= radians(105)
-                    self.count = 1
+        match self.primitives:
+            case "circle":
+                # сканирование окружности
+                # если есть препятствие
+                if self.distance and self.scan_run:
                     self.mode = self.modes[0]
-                    self.run_rotate = True
-                    self.scan_run = True
+
+                elif self.run_rotate is False:
+                    self.mode = self.modes[1]
+
+                elif self.run_rotate:
+                    self.mode = self.modes[2]
+
+                match self.mode:
+                    case "scan":
+
+                        # обновление списка
+                        self.math.add_list(self.points)
+
+                        if self.math.length() > 3:
+                            (x_c, y_c), r = self.math.approx_circ()
+
+                            if abs(self.rad - r) < self.eps:
+                                self.count = 4
+                                self.scan_run = False
+
+                            self.rad = r
+
+                            self.figures["circles"] = [((x_c, y_c), r, (0, 25, 255))]
+                            self.figures["points"] = [(x_c, y_c)]
+
+                        self.alpha += radians(self.rotate)
+
+                        self.run_rotate = True
+
+                    case "run":
+
+                        if self.dist == 0:
+                            self.dist = (self.locator.range() + 100) * abs(cos(radians(15)))
+                        self.scan_run = False
+                        if self.count_run < self.dist:
+                            self.x = self.x + self.v * cos(self.alpha)
+                            self.y = self.y + self.v * sin(self.alpha)
+                            self.count_run += self.v
+                            self.run_rotate = False
+                        else:
+                            self.count_run = 0
+                            self.run_rotate = True
+                            if self.count == 2:
+                                self.dist = self.dist * tan(radians(15))
+                            else:
+                                self.dist = 0
+
+                    case "rotate":
+                        if self.count == 1:
+                            self.alpha += radians(15 - self.rotate)
+                            self.count += 1
+                            self.mode = self.modes[1]
+                            self.run_rotate = False
+
+                        elif self.count == 2:
+                            self.alpha = self.alpha - radians(90)
+                            self.count += 1
+                            self.mode = self.modes[1]
+                            self.run_rotate = False
+
+                        elif self.count == 3:
+                            self.alpha -= radians(105)
+                            self.count = 1
+                            self.mode = self.modes[0]
+                            self.run_rotate = True
+                            self.scan_run = True
+
+                        elif self.count == 4:
+                            self.x += 0
+                            self.y += 0
+            case "rectangle":
+                pass
+            case "borders":
+
+                if self.distance and self.scan_run:
+
+                    # если не посчитана ни одна прямая
+                    if not self.temp_list:
+                        # если в списке набралось больше 2 точек
+                        if len(self.points) > 2:
+                            self.math.add_list(self.points)
+                            k, b = self.math.is_line()
+                            self.temp_list.append(Line("1", k, b, self.points))
+
+                    else:
+                        line = self.temp_list[-1]
+                        x, y = self.points[-1]
+
+                        a, b = line.coeffs()
+                        # если точка принадлежит текущей прямой
+                        if y - 5 <= a * x + b <= y + 5:
+                            self.math.add_list(self.points)
+                            k, b = self.math.is_line()
+                            self.temp_list[-1] = Line(str(len(self.temp_list)), k, b, self.points)
+                        else:
+
+                            if len(self.points) > 3:
+                                del self.points[0:-1]
+
+                            if len(self.points) > 2:
+                                self.math.add_list(self.points)
+                                k, b = self.math.is_line()
+                                self.temp_list.append(Line(str(len(self.temp_list)), k, b, self.points))
+
+                                angle = Angle(self.temp_list[-2], self.temp_list[-1])
+                                angle.center_point()
+                                angle.in_or_out(self.x, self.y)
+                                self.angles.append(angle)
+                elif self.distance and self.scan_run is False:
+                    if self.distance <= 40:
+                        self.alpha += radians(130)
+                        self.scan_run = True
+                else:
+                    if self.dist < 100:
+                        self.x = self.x + self.v * cos(self.alpha)
+                        self.y = self.y + self.v * sin(self.alpha)
+                        self.dist += self.v
+                    else:
+                        self.dist = 0
+
+                    self.alpha += radians(2)
+
+
 
         self.locator.make_query(self.x, self.y, self.alpha)
